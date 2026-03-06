@@ -3,17 +3,24 @@
 <head>
   <meta charset="UTF-8">
   <style>
+    * {
+      box-sizing: border-box;
+    }
+    
     body { 
-      width: 350px; 
+      width: 400px; 
       padding: 15px; 
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
       font-size: 14px;
+      margin: 0;
     }
+    
     h2 { 
       margin-top: 0; 
       font-size: 18px;
       color: #333;
     }
+    
     #status { 
       margin: 10px 0; 
       color: #666; 
@@ -22,6 +29,7 @@
       background: #f5f5f5;
       border-radius: 4px;
     }
+    
     button {
       width: 100%;
       padding: 12px;
@@ -34,31 +42,24 @@
       margin-bottom: 8px;
       transition: background-color 0.2s;
     }
+    
     button:disabled { 
       background-color: #ccc; 
       cursor: not-allowed; 
     }
+    
     button:hover:not(:disabled) { 
       background-color: #45a049; 
     }
+    
     #previewBtn {
       background-color: #2196F3;
     }
+    
     #previewBtn:hover:not(:disabled) {
       background-color: #1976D2;
     }
-    .log { 
-      font-size: 12px; 
-      color: #666; 
-      margin-top: 10px; 
-      max-height: 200px; 
-      overflow-y: auto;
-      background: #fafafa;
-      padding: 10px;
-      border-radius: 4px;
-      border: 1px solid #e0e0e0;
-      line-height: 1.6;
-    }
+    
     .progress-bar {
       width: 100%;
       height: 8px;
@@ -68,11 +69,156 @@
       overflow: hidden;
       display: none;
     }
+    
     .progress-fill {
       height: 100%;
       background: linear-gradient(90deg, #4CAF50, #8BC34A);
       width: 0%;
       transition: width 0.3s;
+    }
+    
+    /* 预览区域样式 */
+    #previewContainer {
+      display: none;
+      margin-top: 15px;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      max-height: 400px;
+      overflow: hidden;
+    }
+    
+    #previewHeader {
+      background: #f5f5f5;
+      padding: 10px;
+      border-bottom: 1px solid #e0e0e0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    #previewHeader h3 {
+      margin: 0;
+      font-size: 14px;
+      color: #333;
+    }
+    
+    .preview-actions {
+      display: flex;
+      gap: 8px;
+    }
+    
+    .preview-actions button {
+      width: auto;
+      padding: 4px 12px;
+      margin: 0;
+      font-size: 12px;
+    }
+    
+    #svgList {
+      max-height: 340px;
+      overflow-y: auto;
+      padding: 10px;
+    }
+    
+    .svg-item {
+      display: flex;
+      align-items: center;
+      padding: 8px;
+      margin-bottom: 8px;
+      background: #fafafa;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      transition: background-color 0.2s;
+    }
+    
+    .svg-item:hover {
+      background: #f0f0f0;
+    }
+    
+    .svg-item input[type="checkbox"] {
+      margin-right: 10px;
+      cursor: pointer;
+      width: 16px;
+      height: 16px;
+    }
+    
+    .svg-preview {
+      width: 40px;
+      height: 40px;
+      margin-right: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      background: white;
+      object-fit: contain;
+    }
+    
+    .svg-info {
+      flex: 1;
+      min-width: 0;
+    }
+    
+    .svg-name {
+      font-size: 12px;
+      color: #333;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 2px;
+    }
+    
+    .svg-meta {
+      font-size: 11px;
+      color: #999;
+    }
+    
+    .svg-type {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 10px;
+      margin-left: 5px;
+    }
+    
+    .type-inline {
+      background: #e3f2fd;
+      color: #1976d2;
+    }
+    
+    .type-external {
+      background: #f3e5f5;
+      color: #7b1fa2;
+    }
+    
+    #log { 
+      font-size: 12px; 
+      color: #666; 
+      margin-top: 10px; 
+      max-height: 100px; 
+      overflow-y: auto;
+      background: #fafafa;
+      padding: 10px;
+      border-radius: 4px;
+      border: 1px solid #e0e0e0;
+      line-height: 1.6;
+    }
+    
+    .search-box {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      margin-bottom: 10px;
+      font-size: 13px;
+    }
+    
+    .search-box:focus {
+      outline: none;
+      border-color: #2196F3;
+    }
+    
+    .selected-count {
+      font-size: 12px;
+      color: #666;
     }
   </style>
 </head>
@@ -84,9 +230,22 @@
   </div>
   <button id="downloadBtn" disabled>下载全部 (ZIP)</button>
   <button id="previewBtn" disabled>预览列表</button>
-  <div id="log" class="log"></div>
   
-  <!-- 引入 JSZip -->
+  <!-- 预览容器 -->
+  <div id="previewContainer">
+    <div id="previewHeader">
+      <h3>📋 SVG 列表 <span class="selected-count" id="selectedCount">(0/0 已选)</span></h3>
+      <div class="preview-actions">
+        <button id="selectAllBtn">全选</button>
+        <button id="invertSelectBtn">反选</button>
+      </div>
+    </div>
+    <input type="text" id="searchBox" class="search-box" placeholder="🔍 搜索文件名...">
+    <div id="svgList"></div>
+  </div>
+  
+  <div id="log"></div>
+  
   <script src="jszip.min.js"></script>
   <script src="popup.js"></script>
 </body>
