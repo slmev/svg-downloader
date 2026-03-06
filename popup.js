@@ -8,28 +8,21 @@ document.addEventListener('DOMContentLoaded', () => {
   const progressBar = document.getElementById('progressBar');
   const progressFill = document.getElementById('progressFill');
 
-  // 初始化日志
   addLog("🔍 正在扫描页面...");
 
-  // 获取当前标签页并获取 SVG 数据
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     if (!tabs || tabs.length === 0) {
       statusDiv.textContent = "❌ 无法获取当前标签页";
-      statusDiv.style.color = "#d32f2f";
       return;
     }
 
-    const tabId = tabs[0].id;
-    
-    // 发送消息给 content.js
-    chrome.tabs.sendMessage(tabId, { action: 'getSvgs' }, (response) => {
+    chrome.tabs.sendMessage(tabs[0].id, { action: 'getSvgs' }, (response) => {
       const error = chrome.runtime.lastError;
       
       if (error) {
         console.error('消息发送错误:', error);
         statusDiv.textContent = "❌ 请刷新页面后重试";
-        statusDiv.style.color = "#d32f2f";
-        addLog("提示：请刷新页面，确保 content.js 已加载");
+        addLog("提示：请刷新页面");
         return;
       }
 
@@ -37,17 +30,26 @@ document.addEventListener('DOMContentLoaded', () => {
         foundSvgs = response.svgs;
         const count = response.count;
         
+        // 验证数据
+        console.log('[Popup] 收到 SVG 数据:', {
+          count: count,
+          firstSvg: foundSvgs[0] ? {
+            name: foundSvgs[0].name,
+            type: foundSvgs[0].type,
+            dataLength: foundSvgs[0].data?.length || 0
+          } : null
+        });
+        
         if (count > 0) {
           statusDiv.textContent = "✅ 发现 " + count + " 个 SVG";
           statusDiv.style.color = "#2e7d32";
           downloadBtn.disabled = false;
           previewBtn.disabled = false;
           previewBtn.textContent = "预览列表 (" + count + ")";
-          addLog("✓ 扫描完成，找到 " + count + " 个 SVG");
+          addLog("✓ 扫描完成");
         } else {
           statusDiv.textContent = "⚠️ 未找到 SVG 图片";
           statusDiv.style.color = "#f57c00";
-          addLog("提示：页面可能没有内联或外部 SVG");
         }
       } else {
         statusDiv.textContent = "❌ 获取数据失败";
@@ -57,16 +59,15 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // 预览列表
   previewBtn.addEventListener('click', () => {
     logDiv.innerHTML = "<strong>📋 SVG 列表:</strong><br>";
     foundSvgs.forEach((svg, i) => {
       const type = svg.type === 'inline' ? '📄 内联' : '🔗 外部';
-      logDiv.innerHTML += (i + 1) + ". " + type + " - " + svg.name + "<br>";
+      const size = svg.data ? Math.round(svg.data.length / 1024 * 100) / 100 + ' KB' : 'N/A';
+      logDiv.innerHTML += (i + 1) + ". " + type + " - " + svg.name + " (" + size + ")<br>";
     });
   });
 
-  // 下载逻辑 (使用 JSZip)
   downloadBtn.addEventListener('click', async () => {
     if (foundSvgs.length === 0) {
       addLog("❌ 没有可下载的 SVG");
@@ -79,36 +80,40 @@ document.addEventListener('DOMContentLoaded', () => {
     progressBar.style.display = 'block';
     progressFill.style.width = '0%';
     logDiv.innerHTML = "";
-    addLog("📦 开始打包 SVG 文件...");
+    addLog("📦 开始打包...");
 
     try {
       const zip = new JSZip();
       const svgFolder = zip.folder("svgs");
 
-      // 处理所有 SVG
       for (let i = 0; i < foundSvgs.length; i++) {
         const svg = foundSvgs[i];
         updateProgress(i + 1, foundSvgs.length);
 
         try {
           if (svg.type === 'inline') {
-            // 内联 SVG 直接添加内容（指定 UTF-8 编码）
-            svgFolder.file(svg.name, svg.data, {
-              binary: false,
-              encoding: "UTF-8"
-            });
-            addLog("✓ " + svg.name);
+            // 关键修复：确保 data 存在且不为空
+            if (!svg.data || svg.data.length === 0) {
+              addLog("✗ " + svg.name + " (数据为空，跳过)");
+              console.warn('[跳过] SVG 数据为空:', svg.name);
+              continue;
+            }
+            
+            // 写入文件
+            svgFolder.file(svg.name, svg.data);
+            addLog("✓ " + svg.name + " (" + Math.round(svg.data.length / 1024 * 100) / 100 + " KB)");
+            
           } else if (svg.type === 'external') {
-            // 外部 SVG 需要 fetch 获取内容
             try {
               const response = await fetch(svg.url);
               if (response.ok) {
                 const svgText = await response.text();
-                svgFolder.file(svg.name, svgText, {
-                  binary: false,
-                  encoding: "UTF-8"
-                });
-                addLog("✓ " + svg.name);
+                if (svgText && svgText.length > 0) {
+                  svgFolder.file(svg.name, svgText);
+                  addLog("✓ " + svg.name);
+                } else {
+                  addLog("✗ " + svg.name + " (内容为空)");
+                }
               } else {
                 addLog("✗ " + svg.name + " (HTTP " + response.status + ")");
               }
@@ -122,25 +127,27 @@ document.addEventListener('DOMContentLoaded', () => {
           console.error('File error:', fileError);
         }
 
-        // 避免阻塞 UI
         await new Promise(r => setTimeout(r, 30));
       }
 
       updateProgress(foundSvgs.length, foundSvgs.length);
-      addLog("<br>📦 生成 ZIP 文件中...");
+      addLog("<br>📦 生成 ZIP...");
 
-      // 生成 ZIP 文件（指定编码）
-      const content = await zip.generateAsync({ 
+      // 验证 ZIP 内容
+      const zipContent = await zip.generateAsync({ 
         type: "blob",
-        compression: "DEFLATE",
-        compressionOptions: { level: 6 }
+        compression: "DEFLATE"
       });
       
-      // 创建下载链接
-      const url = URL.createObjectURL(content);
-      const timestamp = new Date().toISOString()
-        .replace(/[:.]/g, '-')
-        .slice(0, -5);
+      console.log('[Popup] ZIP 文件大小:', zipContent.size, '字节');
+      
+      // 验证 ZIP 中的文件
+      const zipCheck = new JSZip();
+      await zipCheck.loadAsync(zipContent);
+      console.log('[Popup] ZIP 中的文件:', Object.keys(zipCheck.files));
+      
+      const url = URL.createObjectURL(zipContent);
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
       const filename = "svgs-" + timestamp + ".zip";
 
       chrome.downloads.download({
@@ -178,14 +185,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // 更新进度条
   function updateProgress(current, total) {
     const percent = Math.round((current / total) * 100);
     progressFill.style.width = percent + "%";
     statusDiv.textContent = "处理中... " + current + "/" + total;
   }
 
-  // 添加日志
   function addLog(msg) {
     const div = document.createElement('div');
     div.innerHTML = msg;
